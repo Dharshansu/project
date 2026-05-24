@@ -1,0 +1,303 @@
+import tkinter as tk
+from tkinter import messagebox, ttk
+import random
+
+# ──────────────────────────────────────────────
+#  Main Application Window
+# ──────────────────────────────────────────────
+
+class StudentApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Student Pass / Fail Analyzer")
+        self.root.geometry("780x620")
+        self.root.resizable(False, False)
+        self.root.configure(bg="#1e1e2e")
+
+        # Store all student records
+        self.students = []
+
+        self.build_header()
+        self.build_input_section()
+        self.build_table_section()
+        self.build_summary_section()
+        self.build_buttons()
+
+    # ── Header ──────────────────────────────────
+    def build_header(self):
+        header = tk.Frame(self.root, bg="#313244", pady=12)
+        header.pack(fill="x")
+
+        tk.Label(
+            header,
+            text="🎓  Student Pass / Fail Analysis",
+            font=("Courier New", 20, "bold"),
+            bg="#313244",
+            fg="#cdd6f4"
+        ).pack()
+
+        tk.Label(
+            header,
+            text="Enter student marks and check results instantly",
+            font=("Courier New", 10),
+            bg="#313244",
+            fg="#6c7086"
+        ).pack()
+
+    # ── Input Section ───────────────────────────
+    def build_input_section(self):
+        frame = tk.LabelFrame(
+            self.root,
+            text="  Add Student  ",
+            font=("Courier New", 11, "bold"),
+            bg="#1e1e2e",
+            fg="#89b4fa",
+            bd=2,
+            relief="groove",
+            padx=14,
+            pady=10
+        )
+        frame.pack(fill="x", padx=20, pady=(14, 6))
+
+        # Row 1 — Name and Roll No
+        row1 = tk.Frame(frame, bg="#1e1e2e")
+        row1.pack(fill="x", pady=4)
+
+        tk.Label(row1, text="Student Name:", font=("Courier New", 10), bg="#1e1e2e", fg="#cdd6f4", width=16, anchor="w").grid(row=0, column=0, padx=4)
+        self.name_var = tk.StringVar()
+        tk.Entry(row1, textvariable=self.name_var, font=("Courier New", 10), bg="#313244", fg="#cdd6f4",
+                 insertbackground="white", relief="flat", width=22).grid(row=0, column=1, padx=6)
+
+        tk.Label(row1, text="Roll No:", font=("Courier New", 10), bg="#1e1e2e", fg="#cdd6f4", width=10, anchor="w").grid(row=0, column=2, padx=4)
+        self.roll_var = tk.StringVar()
+        tk.Entry(row1, textvariable=self.roll_var, font=("Courier New", 10), bg="#313244", fg="#cdd6f4",
+                 insertbackground="white", relief="flat", width=12).grid(row=0, column=3, padx=6)
+
+        # Row 2 — Subject marks
+        row2 = tk.Frame(frame, bg="#1e1e2e")
+        row2.pack(fill="x", pady=4)
+
+        subjects = ["Maths", "Science", "English", "History", "CS"]
+        self.mark_vars = []
+
+        for i, sub in enumerate(subjects):
+            tk.Label(row2, text=f"{sub}:", font=("Courier New", 10), bg="#1e1e2e", fg="#a6e3a1", width=8, anchor="w").grid(row=0, column=i*2, padx=4)
+            var = tk.StringVar()
+            tk.Entry(row2, textvariable=var, font=("Courier New", 10), bg="#313244", fg="#cdd6f4",
+                     insertbackground="white", relief="flat", width=6).grid(row=0, column=i*2+1, padx=4)
+            self.mark_vars.append(var)
+
+        # Pass mark label
+        tk.Label(frame, text="Pass mark per subject: 35  |  Total subjects: 5", font=("Courier New", 9),
+                 bg="#1e1e2e", fg="#6c7086").pack(anchor="w", pady=(4, 0))
+
+    # ── Table Section ───────────────────────────
+    def build_table_section(self):
+        frame = tk.LabelFrame(
+            self.root,
+            text="  Student Records  ",
+            font=("Courier New", 11, "bold"),
+            bg="#1e1e2e",
+            fg="#89b4fa",
+            bd=2,
+            relief="groove",
+            padx=6,
+            pady=6
+        )
+        frame.pack(fill="both", expand=True, padx=20, pady=6)
+
+        cols = ("Roll", "Name", "Maths", "Science", "English", "History", "CS", "Total", "Avg", "Result")
+        self.tree = ttk.Treeview(frame, columns=cols, show="headings", height=8)
+
+        # Style
+        style = ttk.Style()
+        style.theme_use("clam")
+        style.configure("Treeview",
+                        background="#1e1e2e",
+                        foreground="#cdd6f4",
+                        fieldbackground="#1e1e2e",
+                        font=("Courier New", 9),
+                        rowheight=26)
+        style.configure("Treeview.Heading",
+                        background="#313244",
+                        foreground="#89b4fa",
+                        font=("Courier New", 9, "bold"),
+                        relief="flat")
+        style.map("Treeview", background=[("selected", "#45475a")])
+
+        col_widths = [55, 130, 60, 65, 65, 65, 55, 60, 55, 70]
+        for col, w in zip(cols, col_widths):
+            self.tree.heading(col, text=col)
+            self.tree.column(col, width=w, anchor="center")
+
+        self.tree.tag_configure("pass", foreground="#a6e3a1")
+        self.tree.tag_configure("fail", foreground="#f38ba8")
+
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        self.tree.pack(fill="both", expand=True)
+
+    # ── Summary Section ──────────────────────────
+    def build_summary_section(self):
+        frame = tk.Frame(self.root, bg="#1e1e2e")
+        frame.pack(fill="x", padx=20, pady=(2, 6))
+
+        self.lbl_total    = self._stat_label(frame, "Total Students: 0")
+        self.lbl_passed   = self._stat_label(frame, "Passed: 0",  "#a6e3a1")
+        self.lbl_failed   = self._stat_label(frame, "Failed: 0",  "#f38ba8")
+        self.lbl_top      = self._stat_label(frame, "Top Scorer: —", "#f9e2af")
+        self.lbl_avg      = self._stat_label(frame, "Class Avg: —", "#89b4fa")
+
+    def _stat_label(self, parent, text, fg="#cdd6f4"):
+        lbl = tk.Label(parent, text=text, font=("Courier New", 9, "bold"),
+                       bg="#313244", fg=fg, padx=10, pady=5, relief="flat")
+        lbl.pack(side="left", padx=4)
+        return lbl
+
+    # ── Buttons ──────────────────────────────────
+    def build_buttons(self):
+        frame = tk.Frame(self.root, bg="#1e1e2e")
+        frame.pack(pady=8)
+
+        btn_cfg = dict(font=("Courier New", 10, "bold"), relief="flat", cursor="hand2", width=14, pady=6)
+
+        tk.Button(frame, text="➕  Add Student", bg="#89b4fa", fg="#1e1e2e",
+                  command=self.add_student, **btn_cfg).grid(row=0, column=0, padx=6)
+
+        tk.Button(frame, text="🎲  Load Demo", bg="#cba6f7", fg="#1e1e2e",
+                  command=self.load_demo, **btn_cfg).grid(row=0, column=1, padx=6)
+
+        tk.Button(frame, text="🗑  Clear All", bg="#f38ba8", fg="#1e1e2e",
+                  command=self.clear_all, **btn_cfg).grid(row=0, column=2, padx=6)
+
+        tk.Button(frame, text="❌  Remove Selected", bg="#fab387", fg="#1e1e2e",
+                  command=self.remove_selected, **btn_cfg).grid(row=0, column=3, padx=6)
+
+    # ──────────────────────────────────────────────
+    #  Logic Methods
+    # ──────────────────────────────────────────────
+
+    def add_student(self):
+        name = self.name_var.get().strip()
+        roll = self.roll_var.get().strip()
+
+        if not name or not roll:
+            messagebox.showwarning("Missing Info", "Please enter Student Name and Roll No.")
+            return
+
+        # Check duplicate roll number
+        for s in self.students:
+            if s["roll"] == roll:
+                messagebox.showerror("Duplicate", f"Roll No '{roll}' already exists.")
+                return
+
+        marks = []
+        for i, var in enumerate(self.mark_vars):
+            val = var.get().strip()
+            if not val:
+                messagebox.showwarning("Missing Marks", f"Please fill all 5 subject marks.")
+                return
+            try:
+                m = int(val)
+                if not (0 <= m <= 100):
+                    raise ValueError
+                marks.append(m)
+            except ValueError:
+                messagebox.showerror("Invalid Mark", f"Enter a valid integer (0–100) for each subject.")
+                return
+
+        self._save_student(roll, name, marks)
+        self._clear_inputs()
+
+    def _save_student(self, roll, name, marks):
+        total = sum(marks)
+        avg   = total / len(marks)
+
+        # Fail if any subject below 35
+        failed_subs = [m for m in marks if m < 35]
+        result = "FAIL" if failed_subs else "PASS"
+
+        record = {
+            "roll": roll,
+            "name": name,
+            "marks": marks,
+            "total": total,
+            "avg": round(avg, 1),
+            "result": result
+        }
+        self.students.append(record)
+
+        tag = "pass" if result == "PASS" else "fail"
+        self.tree.insert("", "end",
+                         values=(roll, name, *marks, total, f"{avg:.1f}", result),
+                         tags=(tag,))
+        self._update_summary()
+
+    def _update_summary(self):
+        total   = len(self.students)
+        passed  = sum(1 for s in self.students if s["result"] == "PASS")
+        failed  = total - passed
+
+        top     = max(self.students, key=lambda s: s["total"], default=None)
+        cls_avg = sum(s["avg"] for s in self.students) / total if total else 0
+
+        self.lbl_total.config(text=f"Total Students: {total}")
+        self.lbl_passed.config(text=f"Passed: {passed}")
+        self.lbl_failed.config(text=f"Failed: {failed}")
+        self.lbl_top.config(text=f"Top Scorer: {top['name']} ({top['total']})" if top else "Top Scorer: —")
+        self.lbl_avg.config(text=f"Class Avg: {cls_avg:.1f}" if total else "Class Avg: —")
+
+    def _clear_inputs(self):
+        self.name_var.set("")
+        self.roll_var.set("")
+        for v in self.mark_vars:
+            v.set("")
+
+    def remove_selected(self):
+        selected = self.tree.selection()
+        if not selected:
+            messagebox.showinfo("Select Row", "Please select a student row to remove.")
+            return
+        for item in selected:
+            vals = self.tree.item(item, "values")
+            roll = vals[0]
+            self.students = [s for s in self.students if s["roll"] != roll]
+            self.tree.delete(item)
+        self._update_summary()
+
+    def clear_all(self):
+        if not self.students:
+            return
+        if messagebox.askyesno("Clear All", "Remove all student records?"):
+            self.students.clear()
+            for item in self.tree.get_children():
+                self.tree.delete(item)
+            self._update_summary()
+
+    def load_demo(self):
+        demo_names = [
+            ("101", "Aarav Sharma"),
+            ("102", "Priya Nair"),
+            ("103", "Rohan Mehta"),
+            ("104", "Sneha Iyer"),
+            ("105", "Karthik Raj"),
+        ]
+        existing_rolls = {s["roll"] for s in self.students}
+        for roll, name in demo_names:
+            if roll in existing_rolls:
+                continue
+            # Intentionally give some students a failing mark
+            marks = [random.randint(28 if i == 0 and roll in ("103", "105") else 40, 95)
+                     for i in range(5)]
+            self._save_student(roll, name, marks)
+
+
+# ──────────────────────────────────────────────
+#  Entry Point
+# ──────────────────────────────────────────────
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app  = StudentApp(root)
+    root.mainloop()
