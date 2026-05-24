@@ -1,0 +1,967 @@
+# ============================================================
+#   Swiggy Ratings Analysis Dashboard
+#   Pure tkinter only — NO matplotlib, NO external packages
+#   Just run: python swiggy_dashboard.py
+# ============================================================
+
+import tkinter as tk
+from tkinter import ttk, messagebox
+import random
+from collections import Counter
+import math
+
+# ─── Colour palette ───────────────────────────────────────
+BG       = "#0f0f0f"
+CARD     = "#1a1a1a"
+BORDER   = "#2a2a2a"
+ORANGE   = "#FC8019"
+ORANGE2  = "#ff9f45"
+RED      = "#e74c3c"
+GREEN    = "#2ecc71"
+BLUE     = "#3498db"
+PURPLE   = "#9b59b6"
+YELLOW   = "#f1c40f"
+TEXT     = "#f0f0f0"
+MUTED    = "#888888"
+CHART_BG = "#141414"
+
+# ─── Dataset ──────────────────────────────────────────────
+CUISINES = [
+    "Biryani", "Pizza", "Burger", "Chinese", "South Indian",
+    "North Indian", "Desserts", "Rolls & Wraps", "Pasta", "Sushi",
+]
+AREAS = [
+    "Koramangala", "Indiranagar", "HSR Layout", "Whitefield",
+    "Jayanagar", "MG Road", "BTM Layout", "Marathahalli",
+]
+REST_NAMES = [
+    "Behrouz Biryani", "Domino's Pizza", "McDonald's", "Burger King",
+    "Wow! Momo", "Barbeque Nation", "Social", "Punjab Grill",
+    "Truffles", "The Fatty Bao", "Toit", "Meghana Foods",
+    "Vidyarthi Bhavan", "CTR", "MTR", "Empire Restaurant",
+    "Onesta", "Corner House", "Ammi's Biryani", "Flechazo",
+    "The Bowl Company", "Chick-fil-A", "Paradise Biryani", "Pizza Hut",
+    "KFC", "Subway", "Pind Balluchi", "Hotel Saravanaa Bhavan",
+    "Mast Kalandar", "Nandos",
+]
+
+def generate_data(n=30):
+    records = []
+    for i in range(n):
+        records.append({
+            "name":       REST_NAMES[i % len(REST_NAMES)],
+            "rating":     round(random.uniform(2.8, 4.9), 1),
+            "reviews":    random.randint(50, 5000),
+            "deliveries": random.randint(100, 8000),
+            "cuisine":    random.choice(CUISINES),
+            "area":       random.choice(AREAS),
+            "price":      random.choice([100, 150, 200, 300, 400, 500, 600]),
+        })
+    return records
+
+# ─── Helpers ──────────────────────────────────────────────
+def rating_color(r):
+    if r >= 4.5: return GREEN
+    if r >= 4.0: return ORANGE
+    if r >= 3.5: return YELLOW
+    return RED
+
+def rating_label(r):
+    if r >= 4.5: return "Excellent"
+    if r >= 4.0: return "Good"
+    if r >= 3.5: return "Average"
+    return "Poor"
+
+def stars(r):
+    full  = int(r)
+    half  = 1 if (r - full) >= 0.5 else 0
+    empty = 5 - full - half
+    return "★" * full + ("½" if half else "") + "☆" * empty
+
+
+# ─── Canvas Chart Helpers ─────────────────────────────────
+
+def draw_bar_chart(canvas, data_items, title, x_label="", y_label="",
+                   horizontal=False, show_values=True):
+    """Generic bar chart drawn on a tk.Canvas."""
+    canvas.delete("all")
+    W = int(canvas.cget("width"))
+    H = int(canvas.cget("height"))
+
+    pad_l = 55 if not horizontal else 90
+    pad_r = 20
+    pad_t = 34
+    pad_b = 50
+
+    canvas.create_text(W // 2, 14, text=title, fill=ORANGE,
+                       font=("Courier New", 10, "bold"))
+
+    if not data_items:
+        canvas.create_text(W // 2, H // 2, text="No data",
+                           fill=MUTED, font=("Courier New", 9))
+        return
+
+    labels = [str(item[0]) for item in data_items]
+    values = [item[1] for item in data_items]
+    colors = [item[2] if len(item) > 2 else ORANGE for item in data_items]
+
+    max_v = max(values) if values else 1
+
+    if not horizontal:
+        chart_w = W - pad_l - pad_r
+        chart_h = H - pad_t - pad_b
+        bar_w   = max(4, chart_w // len(labels) - 4)
+
+        # Y gridlines
+        for i in range(5):
+            y = pad_t + chart_h - i * chart_h / 4
+            val = max_v * i / 4
+            canvas.create_line(pad_l, y, W - pad_r, y,
+                                fill=BORDER, dash=(3, 4))
+            canvas.create_text(pad_l - 4, y, text=f"{val:.1f}",
+                                fill=MUTED, font=("Courier New", 7), anchor="e")
+
+        # Bars
+        for idx, (label, val, color) in enumerate(zip(labels, values, colors)):
+            x0 = pad_l + idx * (chart_w / len(labels)) + 4
+            bar_h = (val / max_v) * chart_h if max_v else 0
+            y0 = pad_t + chart_h - bar_h
+            y1 = pad_t + chart_h
+            x1 = x0 + bar_w
+            canvas.create_rectangle(x0, y0, x1, y1, fill=color, outline="")
+            # X label
+            canvas.create_text((x0 + x1) / 2, y1 + 8,
+                                text=label[:9], fill=MUTED,
+                                font=("Courier New", 7), angle=30, anchor="ne")
+            # Value on top
+            if show_values and bar_h > 10:
+                canvas.create_text((x0 + x1) / 2, y0 - 4,
+                                   text=f"{val:.2f}" if isinstance(val, float) else str(val),
+                                   fill=TEXT, font=("Courier New", 7))
+
+        # Axes
+        canvas.create_line(pad_l, pad_t, pad_l, pad_t + chart_h, fill=MUTED)
+        canvas.create_line(pad_l, pad_t + chart_h,
+                           W - pad_r, pad_t + chart_h, fill=MUTED)
+        if x_label:
+            canvas.create_text(W // 2, H - 8, text=x_label,
+                                fill=MUTED, font=("Courier New", 8))
+        if y_label:
+            canvas.create_text(10, H // 2, text=y_label,
+                                fill=MUTED, font=("Courier New", 8), angle=90)
+
+    else:
+        # Horizontal bars
+        chart_w = W - pad_l - pad_r
+        chart_h = H - pad_t - pad_b
+        bar_h   = max(4, chart_h // len(labels) - 6)
+
+        for i in range(5):
+            x = pad_l + i * chart_w / 4
+            canvas.create_line(x, pad_t, x, pad_t + chart_h,
+                                fill=BORDER, dash=(3, 4))
+            canvas.create_text(x, pad_t + chart_h + 10,
+                                text=f"{max_v * i / 4:.1f}",
+                                fill=MUTED, font=("Courier New", 7))
+
+        for idx, (label, val, color) in enumerate(zip(labels, values, colors)):
+            y0 = pad_t + idx * (chart_h / len(labels)) + 3
+            bar_px = (val / max_v) * chart_w if max_v else 0
+            y1 = y0 + bar_h
+            canvas.create_rectangle(pad_l, y0, pad_l + bar_px, y1,
+                                    fill=color, outline="")
+            canvas.create_text(pad_l - 4, (y0 + y1) / 2,
+                                text=label[:12], fill=TEXT,
+                                font=("Courier New", 7), anchor="e")
+            if show_values:
+                canvas.create_text(pad_l + bar_px + 3, (y0 + y1) / 2,
+                                   text=f"{val:.2f}", fill=TEXT,
+                                   font=("Courier New", 7), anchor="w")
+
+        canvas.create_line(pad_l, pad_t, pad_l, pad_t + chart_h, fill=MUTED)
+        canvas.create_line(pad_l, pad_t + chart_h,
+                           W - pad_r, pad_t + chart_h, fill=MUTED)
+
+
+def draw_histogram(canvas, values, title, bins=10, val_range=(2.5, 5.0)):
+    canvas.delete("all")
+    W = int(canvas.cget("width"))
+    H = int(canvas.cget("height"))
+    pad_l, pad_r, pad_t, pad_b = 45, 15, 34, 40
+
+    canvas.create_text(W // 2, 14, text=title, fill=ORANGE,
+                       font=("Courier New", 10, "bold"))
+
+    if not values:
+        canvas.create_text(W // 2, H // 2, text="No data",
+                           fill=MUTED, font=("Courier New", 9))
+        return
+
+    lo, hi = val_range
+    step = (hi - lo) / bins
+    buckets = [0] * bins
+    for v in values:
+        idx = int((v - lo) / step)
+        idx = max(0, min(bins - 1, idx))
+        buckets[idx] += 1
+
+    max_v  = max(buckets) if buckets else 1
+    chart_w = W - pad_l - pad_r
+    chart_h = H - pad_t - pad_b
+    bar_w   = chart_w / bins
+
+    for i in range(5):
+        y = pad_t + chart_h - i * chart_h / 4
+        canvas.create_line(pad_l, y, W - pad_r, y, fill=BORDER, dash=(3, 4))
+        canvas.create_text(pad_l - 4, y,
+                           text=str(int(max_v * i / 4)),
+                           fill=MUTED, font=("Courier New", 7), anchor="e")
+
+    for idx, count in enumerate(buckets):
+        x0    = pad_l + idx * bar_w + 1
+        x1    = x0 + bar_w - 2
+        mid_v = lo + (idx + 0.5) * step
+        color = rating_color(mid_v)
+        bar_h = (count / max_v) * chart_h if max_v else 0
+        y0    = pad_t + chart_h - bar_h
+        y1    = pad_t + chart_h
+        canvas.create_rectangle(x0, y0, x1, y1, fill=color, outline="")
+        if count > 0:
+            canvas.create_text((x0 + x1) / 2, y0 - 4,
+                               text=str(count), fill=TEXT,
+                               font=("Courier New", 7))
+
+    # X-axis labels
+    for i in range(0, bins + 1, 2):
+        x = pad_l + i * bar_w
+        canvas.create_text(x, pad_t + chart_h + 10,
+                           text=f"{lo + i * step:.1f}",
+                           fill=MUTED, font=("Courier New", 7))
+
+    canvas.create_line(pad_l, pad_t, pad_l, pad_t + chart_h, fill=MUTED)
+    canvas.create_line(pad_l, pad_t + chart_h, W - pad_r, pad_t + chart_h, fill=MUTED)
+    canvas.create_text(W // 2, H - 8, text="Rating",
+                       fill=MUTED, font=("Courier New", 8))
+
+
+def draw_scatter(canvas, points, title):
+    """points: list of (x, y, color)"""
+    canvas.delete("all")
+    W = int(canvas.cget("width"))
+    H = int(canvas.cget("height"))
+    pad_l, pad_r, pad_t, pad_b = 50, 20, 34, 50
+
+    canvas.create_text(W // 2, 14, text=title, fill=ORANGE,
+                       font=("Courier New", 10, "bold"))
+
+    if not points:
+        canvas.create_text(W // 2, H // 2, text="No data",
+                           fill=MUTED, font=("Courier New", 9))
+        return
+
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    rx = max_x - min_x or 1
+    ry = max_y - min_y or 1
+    chart_w = W - pad_l - pad_r
+    chart_h = H - pad_t - pad_b
+
+    for i in range(5):
+        y = pad_t + i * chart_h / 4
+        val = max_y - i * ry / 4
+        canvas.create_line(pad_l, y, W - pad_r, y, fill=BORDER, dash=(3, 4))
+        canvas.create_text(pad_l - 4, y, text=f"{val:.1f}",
+                           fill=MUTED, font=("Courier New", 7), anchor="e")
+
+    for i in range(5):
+        x = pad_l + i * chart_w / 4
+        val = min_x + i * rx / 4
+        canvas.create_line(x, pad_t, x, pad_t + chart_h, fill=BORDER, dash=(3, 4))
+        canvas.create_text(x, pad_t + chart_h + 10,
+                           text=f"{int(val)}", fill=MUTED, font=("Courier New", 7))
+
+    for (xv, yv, color) in points:
+        cx = pad_l + (xv - min_x) / rx * chart_w
+        cy = pad_t + (max_y - yv) / ry * chart_h
+        r  = 4
+        canvas.create_oval(cx - r, cy - r, cx + r, cy + r,
+                           fill=color, outline="#333333")
+
+    canvas.create_line(pad_l, pad_t, pad_l, pad_t + chart_h, fill=MUTED)
+    canvas.create_line(pad_l, pad_t + chart_h, W - pad_r, pad_t + chart_h, fill=MUTED)
+    canvas.create_text(W // 2, H - 8, text="Number of Reviews",
+                       fill=MUTED, font=("Courier New", 8))
+    canvas.create_text(12, H // 2, text="Rating",
+                       fill=MUTED, font=("Courier New", 8), angle=90)
+
+    # Legend
+    legend = [("Excellent 4.5+", GREEN), ("Good 4.0-4.5", ORANGE),
+               ("Average 3.5-4.0", YELLOW), ("Poor <3.5", RED)]
+    lx = W - pad_r - 110
+    ly = pad_t + 5
+    for label, col in legend:
+        canvas.create_rectangle(lx, ly, lx + 9, ly + 9, fill=col, outline="")
+        canvas.create_text(lx + 12, ly + 4, text=label, fill=MUTED,
+                           font=("Courier New", 6), anchor="w")
+        ly += 14
+
+
+def draw_pie(canvas, slices, title):
+    """slices: list of (label, value, color)"""
+    canvas.delete("all")
+    W = int(canvas.cget("width"))
+    H = int(canvas.cget("height"))
+
+    canvas.create_text(W // 2, 14, text=title, fill=ORANGE,
+                       font=("Courier New", 10, "bold"))
+
+    if not slices:
+        canvas.create_text(W // 2, H // 2, text="No data",
+                           fill=MUTED, font=("Courier New", 9))
+        return
+
+    total = sum(s[1] for s in slices)
+    if total == 0:
+        return
+
+    cx = W // 2 - 30
+    cy = H // 2 + 10
+    r  = min(W, H) // 2 - 50
+
+    start = -90.0
+    for label, val, color in slices:
+        extent = 360.0 * val / total
+        canvas.create_arc(cx - r, cy - r, cx + r, cy + r,
+                          start=start, extent=extent,
+                          fill=color, outline=CHART_BG, width=2)
+        # Label at midpoint angle
+        mid_angle = math.radians(start + extent / 2)
+        lx = cx + (r * 0.65) * math.cos(mid_angle)
+        ly = cy + (r * 0.65) * math.sin(mid_angle)
+        pct = f"{100 * val / total:.0f}%"
+        canvas.create_text(lx, ly, text=pct, fill=BG,
+                           font=("Courier New", 8, "bold"))
+        start += extent
+
+    # Legend
+    lx = cx + r + 12
+    ly = cy - r + 10
+    for label, val, color in slices:
+        canvas.create_rectangle(lx, ly, lx + 10, ly + 10, fill=color, outline="")
+        canvas.create_text(lx + 14, ly + 5, text=f"{label} ({val})",
+                           fill=TEXT, font=("Courier New", 8), anchor="w")
+        ly += 18
+
+
+def draw_combo_chart(canvas, areas, counts, avgs, title):
+    """Bar + line combo for area analysis."""
+    canvas.delete("all")
+    W = int(canvas.cget("width"))
+    H = int(canvas.cget("height"))
+    pad_l, pad_r, pad_t, pad_b = 45, 55, 34, 55
+
+    canvas.create_text(W // 2, 14, text=title, fill=ORANGE,
+                       font=("Courier New", 10, "bold"))
+
+    if not areas:
+        canvas.create_text(W // 2, H // 2, text="No data",
+                           fill=MUTED, font=("Courier New", 9))
+        return
+
+    chart_w = W - pad_l - pad_r
+    chart_h = H - pad_t - pad_b
+    n       = len(areas)
+    max_c   = max(counts) if counts else 1
+    bar_w   = chart_w / n - 4
+
+    # Count gridlines (left)
+    for i in range(5):
+        y = pad_t + chart_h - i * chart_h / 4
+        canvas.create_line(pad_l, y, W - pad_r, y, fill=BORDER, dash=(3, 4))
+        canvas.create_text(pad_l - 4, y,
+                           text=str(int(max_c * i / 4)),
+                           fill=BLUE, font=("Courier New", 7), anchor="e")
+
+    # Bars
+    for idx, (area, count) in enumerate(zip(areas, counts)):
+        x0 = pad_l + idx * (chart_w / n) + 2
+        x1 = x0 + bar_w
+        bh = (count / max_c) * chart_h if max_c else 0
+        canvas.create_rectangle(x0, pad_t + chart_h - bh, x1,
+                                 pad_t + chart_h, fill=BLUE, outline="")
+        canvas.create_text((x0 + x1) / 2, pad_t + chart_h + 8,
+                           text=area[:8], fill=MUTED,
+                           font=("Courier New", 7), angle=35, anchor="ne")
+
+    # Line for avg rating (right axis 2.0–5.5)
+    min_r, max_r = 2.0, 5.5
+    def rating_y(rv):
+        return pad_t + chart_h - (rv - min_r) / (max_r - min_r) * chart_h
+
+    points_line = []
+    for idx, avg in enumerate(avgs):
+        x = pad_l + (idx + 0.5) * (chart_w / n)
+        y = rating_y(avg)
+        points_line.append((x, y))
+
+    for i in range(len(points_line) - 1):
+        canvas.create_line(points_line[i][0], points_line[i][1],
+                           points_line[i+1][0], points_line[i+1][1],
+                           fill=ORANGE, width=2)
+    for (x, y) in points_line:
+        canvas.create_oval(x - 4, y - 4, x + 4, y + 4,
+                           fill=ORANGE, outline="")
+
+    # Right axis labels
+    for i in range(5):
+        rv = min_r + i * (max_r - min_r) / 4
+        y  = rating_y(rv)
+        canvas.create_text(W - pad_r + 4, y,
+                           text=f"{rv:.1f}", fill=ORANGE,
+                           font=("Courier New", 7), anchor="w")
+
+    canvas.create_line(pad_l, pad_t, pad_l, pad_t + chart_h, fill=BLUE)
+    canvas.create_line(W - pad_r, pad_t, W - pad_r, pad_t + chart_h, fill=ORANGE)
+    canvas.create_line(pad_l, pad_t + chart_h, W - pad_r, pad_t + chart_h, fill=MUTED)
+    canvas.create_text(10, H // 2, text="Count", fill=BLUE,
+                       font=("Courier New", 8), angle=90)
+    canvas.create_text(W - 10, H // 2, text="Avg Rating", fill=ORANGE,
+                       font=("Courier New", 8), angle=90)
+
+
+# ─── Main App ─────────────────────────────────────────────
+class SwiggyDashboard:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Swiggy Ratings Analysis Dashboard")
+        self.root.geometry("1280x800")
+        self.root.configure(bg=BG)
+        self.root.resizable(True, True)
+
+        self.data     = generate_data(30)
+        self.filtered = list(self.data)
+        self.sort_col = None
+        self.sort_asc = True
+        self.cuisine_cb = None
+        self.area_cb    = None
+
+        self._build_header()
+        self._build_filters()
+        self._build_main()
+        self._refresh()
+
+    # ── HEADER ────────────────────────────────────────────
+    def _build_header(self):
+        hdr  = tk.Frame(self.root, bg="#111111", pady=10)
+        hdr.pack(fill="x")
+
+        left = tk.Frame(hdr, bg="#111111")
+        left.pack(side="left", padx=20)
+        tk.Label(left, text="swiggy", font=("Courier New", 26, "bold"),
+                 bg="#111111", fg=ORANGE).pack(side="left")
+        tk.Label(left, text="  ratings dashboard",
+                 font=("Courier New", 14),
+                 bg="#111111", fg=MUTED).pack(side="left", pady=6)
+
+        right = tk.Frame(hdr, bg="#111111")
+        right.pack(side="right", padx=20)
+        tk.Button(right, text="Regenerate Data",
+                  font=("Courier New", 10, "bold"),
+                  bg=ORANGE, fg="white", relief="flat", cursor="hand2",
+                  padx=12, pady=6, command=self._regenerate).pack(side="right", padx=6)
+        tk.Button(right, text="Charts View",
+                  font=("Courier New", 10, "bold"),
+                  bg=CARD, fg=TEXT, relief="flat", cursor="hand2",
+                  padx=12, pady=6,
+                  command=self._open_charts_window).pack(side="right", padx=6)
+
+    # ── FILTERS ───────────────────────────────────────────
+    def _build_filters(self):
+        fbar = tk.Frame(self.root, bg=CARD, pady=8)
+        fbar.pack(fill="x")
+
+        tk.Label(fbar, text="  Filter:", font=("Courier New", 10, "bold"),
+                 bg=CARD, fg=MUTED).pack(side="left", padx=(16, 4))
+
+        tk.Label(fbar, text="Cuisine", font=("Courier New", 9),
+                 bg=CARD, fg=MUTED).pack(side="left", padx=(10, 2))
+        self.cuisine_var = tk.StringVar(value="All")
+        self.cuisine_cb  = ttk.Combobox(
+            fbar, textvariable=self.cuisine_var,
+            values=self._cuisine_opts(), width=14,
+            font=("Courier New", 9), state="readonly")
+        self.cuisine_cb.pack(side="left")
+
+        tk.Label(fbar, text="  Area", font=("Courier New", 9),
+                 bg=CARD, fg=MUTED).pack(side="left", padx=(10, 2))
+        self.area_var = tk.StringVar(value="All")
+        self.area_cb  = ttk.Combobox(
+            fbar, textvariable=self.area_var,
+            values=self._area_opts(), width=14,
+            font=("Courier New", 9), state="readonly")
+        self.area_cb.pack(side="left")
+
+        tk.Label(fbar, text="  Min Rating", font=("Courier New", 9),
+                 bg=CARD, fg=MUTED).pack(side="left", padx=(10, 2))
+        self.min_rating_var = tk.StringVar(value="0")
+        ttk.Combobox(fbar, textvariable=self.min_rating_var,
+                     values=["0", "3.0", "3.5", "4.0", "4.5"],
+                     width=6, font=("Courier New", 9),
+                     state="readonly").pack(side="left")
+
+        tk.Label(fbar, text="  Search", font=("Courier New", 9),
+                 bg=CARD, fg=MUTED).pack(side="left", padx=(10, 2))
+        self.search_var = tk.StringVar()
+        self.search_var.trace("w", lambda *a: self._apply_filters())
+        tk.Entry(fbar, textvariable=self.search_var,
+                 font=("Courier New", 9), bg=BORDER, fg=TEXT,
+                 insertbackground=ORANGE, relief="flat",
+                 width=16).pack(side="left")
+
+        tk.Button(fbar, text="Apply", font=("Courier New", 9, "bold"),
+                  bg=ORANGE, fg="white", relief="flat", cursor="hand2",
+                  padx=10, command=self._apply_filters).pack(side="left", padx=10)
+        tk.Button(fbar, text="Reset", font=("Courier New", 9),
+                  bg=BORDER, fg=MUTED, relief="flat", cursor="hand2",
+                  padx=10, command=self._reset_filters).pack(side="left")
+
+        self.count_lbl = tk.Label(fbar, text="", font=("Courier New", 9),
+                                   bg=CARD, fg=ORANGE)
+        self.count_lbl.pack(side="right", padx=16)
+
+    def _cuisine_opts(self):
+        return ["All"] + sorted(set(r["cuisine"] for r in self.data))
+
+    def _area_opts(self):
+        return ["All"] + sorted(set(r["area"] for r in self.data))
+
+    # ── MAIN AREA ─────────────────────────────────────────
+    def _build_main(self):
+        main = tk.Frame(self.root, bg=BG)
+        main.pack(fill="both", expand=True, padx=12, pady=8)
+
+        left = tk.Frame(main, bg=BG, width=265)
+        left.pack(side="left", fill="y", padx=(0, 8))
+        left.pack_propagate(False)
+        self._build_kpi_panel(left)
+
+        right = tk.Frame(main, bg=BG)
+        right.pack(side="left", fill="both", expand=True)
+        self._build_table(right)
+
+    # ── KPI PANEL ─────────────────────────────────────────
+    def _build_kpi_panel(self, parent):
+        tk.Label(parent, text="OVERVIEW", font=("Courier New", 9, "bold"),
+                 bg=BG, fg=MUTED).pack(anchor="w", pady=(4, 6))
+
+        self.kpi_frames = {}
+        kpi_defs = [
+            ("total",   "Restaurants",  TEXT),
+            ("avg_rat", "Avg Rating",    ORANGE),
+            ("top_rat", "Top Rated",     GREEN),
+            ("low_rat", "Needs Work",    RED),
+            ("reviews", "Total Reviews", BLUE),
+            ("popular", "Most Popular",  PURPLE),
+        ]
+        for key, label, color in kpi_defs:
+            f = tk.Frame(parent, bg=CARD,
+                         highlightbackground=BORDER, highlightthickness=1)
+            f.pack(fill="x", pady=3)
+            col_frame = tk.Frame(f, bg=CARD)
+            col_frame.pack(side="left", padx=10, pady=6)
+            tk.Label(col_frame, text=label, font=("Courier New", 8),
+                     bg=CARD, fg=MUTED).pack(anchor="w")
+            val = tk.Label(col_frame, text="—",
+                           font=("Courier New", 11, "bold"),
+                           bg=CARD, fg=color)
+            val.pack(anchor="w")
+            self.kpi_frames[key] = val
+
+        # Mini rating-bucket bar (canvas)
+        tk.Label(parent, text="RATING DISTRIBUTION",
+                 font=("Courier New", 9, "bold"),
+                 bg=BG, fg=MUTED).pack(anchor="w", pady=(10, 4))
+        self.mini_canvas = tk.Canvas(parent, bg=CHART_BG, width=250, height=130,
+                                     highlightthickness=0)
+        self.mini_canvas.pack(fill="x")
+
+        # Cuisine breakdown
+        tk.Label(parent, text="TOP CUISINES",
+                 font=("Courier New", 9, "bold"),
+                 bg=BG, fg=MUTED).pack(anchor="w", pady=(10, 4))
+        self.cuisine_frame = tk.Frame(parent, bg=BG)
+        self.cuisine_frame.pack(fill="x")
+
+    # ── TABLE ─────────────────────────────────────────────
+    def _build_table(self, parent):
+        tk.Label(parent, text="RESTAURANT RATINGS",
+                 font=("Courier New", 10, "bold"),
+                 bg=BG, fg=TEXT).pack(anchor="w", pady=(4, 6))
+
+        cols    = ("name","cuisine","area","rating","stars",
+                   "grade","reviews","deliveries","price")
+        headers = ("Restaurant","Cuisine","Area","Rating","Stars",
+                   "Grade","Reviews","Deliveries","Avg Cost")
+
+        style = ttk.Style()
+        style.theme_use("clam")
+        style.configure("Swiggy.Treeview",
+                        background=CARD, foreground=TEXT,
+                        fieldbackground=CARD,
+                        font=("Courier New", 9), rowheight=28)
+        style.configure("Swiggy.Treeview.Heading",
+                        background="#1f1f1f", foreground=ORANGE,
+                        font=("Courier New", 9, "bold"), relief="flat")
+        style.map("Swiggy.Treeview",
+                  background=[("selected", "#2c2c2c")],
+                  foreground=[("selected", ORANGE)])
+
+        wrap = tk.Frame(parent, bg=BG)
+        wrap.pack(fill="both", expand=True)
+
+        self.tree = ttk.Treeview(wrap, columns=cols,
+                                  show="headings", style="Swiggy.Treeview")
+        widths = [170, 100, 110, 65, 80, 75, 75, 85, 75]
+        for col, hdr, w in zip(cols, headers, widths):
+            self.tree.heading(col, text=hdr,
+                              command=lambda c=col: self._sort_by(c))
+            self.tree.column(col, width=w, anchor="center")
+        self.tree.column("name", anchor="w")
+
+        for tag, fg in [("Excellent", GREEN), ("Good", ORANGE2),
+                        ("Average", YELLOW),  ("Poor", RED)]:
+            self.tree.tag_configure(tag, foreground=fg)
+
+        sb = ttk.Scrollbar(wrap, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        self.tree.pack(fill="both", expand=True)
+
+        self.status = tk.Label(parent, text="",
+                               font=("Courier New", 8),
+                               bg="#111111", fg=MUTED,
+                               anchor="w", padx=8, pady=4)
+        self.status.pack(fill="x")
+        self.tree.bind("<<TreeviewSelect>>", self._on_select)
+
+    # ── REFRESH & FILTER ──────────────────────────────────
+    def _refresh(self):
+        self._apply_filters()
+
+    def _apply_filters(self):
+        cuisine = self.cuisine_var.get()
+        area    = self.area_var.get()
+        min_r   = float(self.min_rating_var.get() or 0)
+        search  = self.search_var.get().strip().lower()
+
+        self.filtered = [
+            r for r in self.data
+            if (cuisine == "All" or r["cuisine"] == cuisine)
+            and (area == "All" or r["area"] == area)
+            and r["rating"] >= min_r
+            and (not search
+                 or search in r["name"].lower()
+                 or search in r["cuisine"].lower()
+                 or search in r["area"].lower())
+        ]
+
+        if self.sort_col:
+            self.filtered.sort(key=lambda r: r.get(self.sort_col, 0),
+                               reverse=not self.sort_asc)
+
+        self._populate_table()
+        self._update_kpis()
+        self._update_mini_chart()
+        self._update_cuisine_breakdown()
+        self.count_lbl.config(
+            text=f"Showing {len(self.filtered)} restaurants")
+
+    def _reset_filters(self):
+        self.cuisine_var.set("All")
+        self.area_var.set("All")
+        self.min_rating_var.set("0")
+        self.search_var.set("")
+        self._apply_filters()
+
+    def _populate_table(self):
+        for row in self.tree.get_children():
+            self.tree.delete(row)
+        for r in self.filtered:
+            grade = rating_label(r["rating"])
+            self.tree.insert("", "end", tags=(grade,), values=(
+                r["name"], r["cuisine"], r["area"],
+                f"{r['rating']:.1f}",
+                stars(r["rating"]),
+                grade,
+                f"{r['reviews']:,}",
+                f"{r['deliveries']:,}",
+                f"Rs.{r['price']}",
+            ))
+
+    def _update_kpis(self):
+        d = self.filtered
+        if not d:
+            for lbl in self.kpi_frames.values():
+                lbl.config(text="—")
+            return
+
+        ratings   = [r["rating"] for r in d]
+        avg_r     = sum(ratings) / len(ratings)
+        top       = max(d, key=lambda r: r["rating"])
+        low       = min(d, key=lambda r: r["rating"])
+        total_rev = sum(r["reviews"] for r in d)
+        popular   = max(d, key=lambda r: r["deliveries"])
+
+        self.kpi_frames["total"].config(text=str(len(d)))
+        self.kpi_frames["avg_rat"].config(text=f"{avg_r:.2f} *")
+        self.kpi_frames["top_rat"].config(
+            text=f"{top['name'][:18]}\n{top['rating']} *")
+        self.kpi_frames["low_rat"].config(
+            text=f"{low['name'][:18]}\n{low['rating']} *")
+        self.kpi_frames["reviews"].config(text=f"{total_rev:,}")
+        self.kpi_frames["popular"].config(
+            text=f"{popular['name'][:18]}\n{popular['deliveries']:,} orders")
+
+        self.status.config(
+            text=f"  Avg Rating: {avg_r:.2f}  |  "
+                 f"Best: {top['name']} ({top['rating']})  |  "
+                 f"Worst: {low['name']} ({low['rating']})"
+        )
+
+    def _update_mini_chart(self):
+        buckets = {"<3.5": 0, "3.5-4": 0, "4-4.5": 0, "4.5+": 0}
+        colors  = {"<3.5": RED, "3.5-4": YELLOW, "4-4.5": ORANGE, "4.5+": GREEN}
+        for r in self.filtered:
+            rt = r["rating"]
+            if rt < 3.5:   buckets["<3.5"] += 1
+            elif rt < 4.0: buckets["3.5-4"] += 1
+            elif rt < 4.5: buckets["4-4.5"] += 1
+            else:          buckets["4.5+"]  += 1
+
+        items = [(k, v, colors[k]) for k, v in buckets.items()]
+        draw_bar_chart(self.mini_canvas, items,
+                       title="Rating Buckets", show_values=True)
+
+    def _update_cuisine_breakdown(self):
+        for w in self.cuisine_frame.winfo_children():
+            w.destroy()
+
+        counts     = Counter(r["cuisine"] for r in self.filtered)
+        top5       = counts.most_common(5)
+        total      = len(self.filtered) or 1
+        bar_colors = [ORANGE, BLUE, GREEN, PURPLE, YELLOW]
+
+        for i, (cuisine, count) in enumerate(top5):
+            row = tk.Frame(self.cuisine_frame, bg=BG)
+            row.pack(fill="x", pady=2)
+
+            tk.Label(row, text=cuisine[:14], font=("Courier New", 8),
+                     bg=BG, fg=TEXT, width=14, anchor="w").pack(side="left")
+
+            pct = count / total
+            bar_outer = tk.Frame(row, bg=BORDER, height=8, width=90)
+            bar_outer.pack(side="left", padx=4)
+            bar_outer.pack_propagate(False)
+            bar_inner = tk.Frame(bar_outer,
+                                  bg=bar_colors[i % len(bar_colors)],
+                                  height=8,
+                                  width=max(2, int(90 * pct)))
+            bar_inner.place(x=0, y=0)
+
+            tk.Label(row, text=str(count), font=("Courier New", 8),
+                     bg=BG, fg=MUTED).pack(side="left", padx=2)
+
+    # ── SORT ──────────────────────────────────────────────
+    def _sort_by(self, col):
+        sortable = {"name", "cuisine", "area", "rating",
+                    "reviews", "deliveries", "price"}
+        if col not in sortable:
+            return
+        if self.sort_col == col:
+            self.sort_asc = not self.sort_asc
+        else:
+            self.sort_col = col
+            self.sort_asc = True
+        self._apply_filters()
+
+    # ── ROW SELECT ────────────────────────────────────────
+    def _on_select(self, event):
+        sel = self.tree.selection()
+        if not sel:
+            return
+        vals = self.tree.item(sel[0], "values")
+        self.status.config(
+            text=f"  Selected: {vals[0]}  |  Rating: {vals[3]}  |  "
+                 f"Reviews: {vals[6]}  |  Deliveries: {vals[7]}"
+        )
+
+    # ── REGENERATE ────────────────────────────────────────
+    def _regenerate(self):
+        self.data     = generate_data(30)
+        self.filtered = list(self.data)
+        self.sort_col = None
+        self.sort_asc = True
+        self.cuisine_cb.configure(values=self._cuisine_opts())
+        self.area_cb.configure(values=self._area_opts())
+        self._reset_filters()
+
+    # ── CHARTS WINDOW ─────────────────────────────────────
+    def _open_charts_window(self):
+        if not self.filtered:
+            messagebox.showinfo("No Data",
+                                "No restaurants match current filters.")
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title("Charts — Swiggy Ratings Analysis")
+        win.geometry("1100x720")
+        win.configure(bg=BG)
+
+        d = self.filtered
+
+        # Title
+        tk.Label(win, text="Swiggy Ratings — Deep Dive Analytics",
+                 font=("Courier New", 13, "bold"),
+                 bg=BG, fg=ORANGE).pack(pady=(10, 4))
+
+        # ── Row 1 ──────────────────────────────────────────
+        row1 = tk.Frame(win, bg=BG)
+        row1.pack(fill="both", expand=True, padx=10, pady=4)
+
+        # Chart 1: Histogram
+        f1 = tk.Frame(row1, bg=CHART_BG,
+                      highlightbackground=BORDER, highlightthickness=1)
+        f1.pack(side="left", fill="both", expand=True, padx=4)
+        c1 = tk.Canvas(f1, bg=CHART_BG, highlightthickness=0,
+                       width=310, height=280)
+        c1.pack(fill="both", expand=True)
+        draw_histogram(c1, [r["rating"] for r in d],
+                       title="Rating Distribution")
+
+        # Chart 2: Cuisine avg rating (horizontal bar)
+        f2 = tk.Frame(row1, bg=CHART_BG,
+                      highlightbackground=BORDER, highlightthickness=1)
+        f2.pack(side="left", fill="both", expand=True, padx=4)
+        c2 = tk.Canvas(f2, bg=CHART_BG, highlightthickness=0,
+                       width=310, height=280)
+        c2.pack(fill="both", expand=True)
+
+        cuisine_ratings = {}
+        for r in d:
+            cuisine_ratings.setdefault(r["cuisine"], []).append(r["rating"])
+        cuisines_sorted = sorted(
+            cuisine_ratings,
+            key=lambda c: sum(cuisine_ratings[c]) / len(cuisine_ratings[c]),
+            reverse=True)[:8]
+        avgs2 = [sum(cuisine_ratings[c]) / len(cuisine_ratings[c])
+                 for c in cuisines_sorted]
+        items2 = [(c, a, rating_color(a))
+                  for c, a in zip(cuisines_sorted, avgs2)]
+        draw_bar_chart(c2, items2, title="Avg Rating by Cuisine",
+                       horizontal=True)
+
+        # Chart 3: Area combo
+        f3 = tk.Frame(row1, bg=CHART_BG,
+                      highlightbackground=BORDER, highlightthickness=1)
+        f3.pack(side="left", fill="both", expand=True, padx=4)
+        c3 = tk.Canvas(f3, bg=CHART_BG, highlightthickness=0,
+                       width=310, height=280)
+        c3.pack(fill="both", expand=True)
+
+        area_data = {}
+        for r in d:
+            area_data.setdefault(r["area"], {"count": 0, "ratings": []})
+            area_data[r["area"]]["count"]   += 1
+            area_data[r["area"]]["ratings"].append(r["rating"])
+        areas_list  = list(area_data.keys())
+        counts_list = [area_data[a]["count"] for a in areas_list]
+        avgs_list   = [sum(area_data[a]["ratings"]) /
+                       len(area_data[a]["ratings"]) for a in areas_list]
+        draw_combo_chart(c3, areas_list, counts_list, avgs_list,
+                         title="Area: Count & Avg Rating")
+
+        # ── Row 2 ──────────────────────────────────────────
+        row2 = tk.Frame(win, bg=BG)
+        row2.pack(fill="both", expand=True, padx=10, pady=4)
+
+        # Chart 4: Scatter
+        f4 = tk.Frame(row2, bg=CHART_BG,
+                      highlightbackground=BORDER, highlightthickness=1)
+        f4.pack(side="left", fill="both", expand=True, padx=4)
+        c4 = tk.Canvas(f4, bg=CHART_BG, highlightthickness=0,
+                       width=310, height=280)
+        c4.pack(fill="both", expand=True)
+        scatter_pts = [(r["reviews"], r["rating"],
+                        rating_color(r["rating"])) for r in d]
+        draw_scatter(c4, scatter_pts, title="Reviews vs Rating")
+
+        # Chart 5: Price vs avg rating
+        f5 = tk.Frame(row2, bg=CHART_BG,
+                      highlightbackground=BORDER, highlightthickness=1)
+        f5.pack(side="left", fill="both", expand=True, padx=4)
+        c5 = tk.Canvas(f5, bg=CHART_BG, highlightthickness=0,
+                       width=310, height=280)
+        c5.pack(fill="both", expand=True)
+
+        price_data = {}
+        for r in d:
+            price_data.setdefault(r["price"], []).append(r["rating"])
+        prices_sorted = sorted(price_data.keys())
+        p_avgs = [sum(price_data[p]) / len(price_data[p])
+                  for p in prices_sorted]
+        items5 = [(f"Rs{p}", a, rating_color(a))
+                  for p, a in zip(prices_sorted, p_avgs)]
+        draw_bar_chart(c5, items5, title="Price Bracket vs Avg Rating")
+
+        # Chart 6: Pie
+        f6 = tk.Frame(row2, bg=CHART_BG,
+                      highlightbackground=BORDER, highlightthickness=1)
+        f6.pack(side="left", fill="both", expand=True, padx=4)
+        c6 = tk.Canvas(f6, bg=CHART_BG, highlightthickness=0,
+                       width=310, height=280)
+        c6.pack(fill="both", expand=True)
+
+        grades      = Counter(rating_label(r["rating"]) for r in d)
+        grade_order  = ["Excellent", "Good", "Average", "Poor"]
+        grade_colors = [GREEN, ORANGE, YELLOW, RED]
+        slices = [(g, grades[g], c)
+                  for g, c in zip(grade_order, grade_colors)
+                  if g in grades]
+        draw_pie(c6, slices, title="Grade Breakdown")
+
+        # Bind resize to redraw charts
+        charts = [
+            (c1, lambda cv=c1: draw_histogram(
+                cv, [r["rating"] for r in d], "Rating Distribution")),
+            (c2, lambda cv=c2: draw_bar_chart(
+                cv, items2, "Avg Rating by Cuisine", horizontal=True)),
+            (c3, lambda cv=c3: draw_combo_chart(
+                cv, areas_list, counts_list, avgs_list,
+                "Area: Count & Avg Rating")),
+            (c4, lambda cv=c4: draw_scatter(
+                cv, scatter_pts, "Reviews vs Rating")),
+            (c5, lambda cv=c5: draw_bar_chart(
+                cv, items5, "Price Bracket vs Avg Rating")),
+            (c6, lambda cv=c6: draw_pie(cv, slices, "Grade Breakdown")),
+        ]
+
+        def on_resize(event):
+            for canvas, redraw_fn in charts:
+                canvas.after_idle(redraw_fn)
+
+        win.bind("<Configure>", on_resize)
+
+        tk.Button(win, text="Close",
+                  font=("Courier New", 9, "bold"),
+                  bg=RED, fg="white", relief="flat",
+                  cursor="hand2", pady=4,
+                  command=win.destroy).pack(pady=(0, 8))
+
+
+# ─── Entry Point ──────────────────────────────────────────
+if __name__ == "__main__":
+    root = tk.Tk()
+    app  = SwiggyDashboard(root)
+    root.mainloop()
